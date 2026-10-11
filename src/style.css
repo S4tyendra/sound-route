@@ -1,0 +1,244 @@
+/* Modern GTK4 Sound Route Styling */
+
+window {
+    background-color: @window_bg_color;
+    color: @window_fg_color;
+}
+
+.header-title {
+    font-weight: 800;
+    font-size: 15px;
+    letter-spacing: -0.2px;
+}
+
+.header-subtitle {
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+.status-pill {
+    border-radius: 9999px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    background-color: alpha(@window_fg_color, 0.08);
+    color: alpha(@window_fg_color, 0.85);
+}
+
+.section-title {
+    font-weight: 700;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    opacity: 0.85;
+}
+
+.section-count-badge {
+    border-radius: 9999px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    background-color: alpha(@window_fg_color, 0.08);
+    color: alpha(@window_fg_color, 0.75);
+}
+
+.card {
+    background-color: alpha(@window_fg_color, 0.035);
+    border: 1px solid alpha(@window_fg_color, 0.09);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 10px;
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.card:hover {
+    background-color: alpha(@window_fg_color, 0.05);
+    border-color: alpha(@window_fg_color, 0.16);
+}
+
+.card-default {
+    border: 1px solid alpha(@accent_color, 0.45);
+    background-color: alpha(@accent_color, 0.04);
+}
+
+.card-default:hover {
+    border-color: alpha(@accent_color, 0.65);
+    background-color: alpha(@accent_color, 0.07);
+}
+
+.card-title {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.card-subtitle {
+    font-size: 11px;
+    opacity: 0.65;
+}
+
+.badge {
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.badge-default {
+    background-color: alpha(@accent_color, 0.22);
+    color: @accent_color;
+}
+
+.badge-latency {
+    background-color: alpha(@window_fg_color, 0.08);
+    color: alpha(@window_fg_color, 0.75);
+}
+
+.badge-format {
+    background-color: alpha(@window_fg_color, 0.05);
+    color: alpha(@window_fg_color, 0.6);
+}
+
+.badge-state-running {
+    background-color: alpha(#2ec27e, 0.2);
+    color: #2ec27e;
+}
+
+.badge-state-idle {
+    background-color: alpha(@window_fg_color, 0.06);
+    color: alpha(@window_fg_color, 0.45);
+}
+
+.badge-paused {
+    background-color: alpha(#e5a50a, 0.2);
+    color: #e5a50a;
+}
+
+.badge-stranded {
+    background-color: alpha(#e01b24, 0.2);
+    color: #e01b24;
+}
+
+.volume-val-label {
+    font-family: monospace, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 42px;
+    opacity: 0.85;
+}
+
+.volume-scale {
+    margin: 0 4px;
+}
+
+.sub-panel {
+    background-color: alpha(@window_fg_color, 0.025);
+    border: 1px solid alpha(@window_fg_color, 0.06);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-top: 8px;
+}
+
+.sub-panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.7;
+}
+
+.route-extra-item {
+    background-color: alpha(@window_fg_color, 0.02);
+    border: 1px solid alpha(@window_fg_color, 0.06);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-top: 6px;
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.route-extra-item.active-copy {
+    border-color: alpha(@accent_color, 0.35);
+    background-color: alpha(@accent_color, 0.04);
+}
+
+.hint-text {
+    font-size: 11px;
+    opacity: 0.65;
+    font-style: italic;
+}
+
+.banner-box {
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 6px 12px;
+    font-size: 12px;
+}
+
+.banner-error {
+    background-color: alpha(#e01b24, 0.15);
+    border: 1px solid alpha(#e01b24, 0.35);
+    color: #ff7b72;
+}
+
+.banner-info {
+    background-color: alpha(@accent_color, 0.15);
+    border: 1px solid alpha(@accent_color, 0.35);
+    color: @accent_color;
+}
+
+.status-bar {
+    border-top: 1px solid alpha(@window_fg_color, 0.08);
+    padding: 6px 16px;
+    font-size: 11px;
+    opacity: 0.75;
+}
+
+.status-dot {
+    color: #2ec27e;
+    font-size: 14px;
+    margin-right: 4px;
+}
+
+.empty-state {
+    padding: 36px 20px;
+    border-radius: 12px;
+    border: 1px dashed alpha(@window_fg_color, 0.15);
+    margin: 16px 0;
+}
+
+.empty-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-top: 8px;
+}
+
+.empty-desc {
+    font-size: 12px;
+    opacity: 0.6;
+    margin-top: 4px;
+}
+
+.pill-button {
+    border-radius: 9999px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.pill-button-accent {
+    background-color: alpha(@accent_color, 0.18);
+    color: @accent_color;
+    border: 1px solid alpha(@accent_color, 0.35);
+}
+
+.pill-button-accent:hover {
+    background-color: alpha(@accent_color, 0.3);
+}
+
+.orphan-card {
+    background-color: alpha(#e5a50a, 0.08);
+    border: 1px solid alpha(#e5a50a, 0.25);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-top: 12px;
+}
