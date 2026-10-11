@@ -5,7 +5,6 @@ use std::process::Child;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gtk4::gdk;
 use gtk4::glib;
 use gtk4::pango;
 use gtk4::prelude::*;
@@ -22,6 +21,7 @@ use audio::{
 };
 
 const STYLE_CSS: &str = include_str!("style.css");
+const NARROW_BREAKPOINT: i32 = 760;
 
 struct Route {
     stream_index: u32,
@@ -35,10 +35,15 @@ struct Flags {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ViewMode {
-    All,
+enum ActiveSidebar {
     Outputs,
     Streams,
+}
+
+struct SidebarState {
+    outputs_open: Cell<bool>,
+    streams_open: Cell<bool>,
+    last_active: Cell<ActiveSidebar>,
 }
 
 struct DeviceRow {
@@ -83,30 +88,30 @@ struct Ui {
     streams_wrapper: Box,
     devices_box: Box,
     streams_box: Box,
-    view_mode: Rc<Cell<ViewMode>>,
-    _btn_all: ToggleButton,
+    sidebar_state: Rc<SidebarState>,
     btn_outputs: ToggleButton,
     btn_streams: ToggleButton,
-    status_pill: Label,
+    title_box: Box,
     status_bar_left: Label,
     status_bar_right: Label,
     banner_box: Box,
     banner_label: Label,
     banner_icon: Image,
-    device_count_label: Label,
-    stream_count_label: Label,
+    device_count: Cell<usize>,
+    stream_count: Cell<usize>,
     device_rows: Vec<DeviceRow>,
     stream_rows: Vec<StreamRow>,
     routes: Vec<Route>,
     shape: String,
     flags: Rc<Flags>,
     current_width: Rc<Cell<i32>>,
-    current_height: Rc<Cell<i32>>,
+    _current_height: Rc<Cell<i32>>,
 }
 
 fn main() {
     let app = Application::builder()
         .application_id("in.devh.SoundRoute")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
     app.connect_activate(build);
     app.run();
@@ -115,7 +120,7 @@ fn main() {
 fn build(app: &Application) {
     let provider = CssProvider::new();
     provider.load_from_string(STYLE_CSS);
-    if let Some(display) = gdk::Display::default() {
+    if let Some(display) = gtk4::gdk::Display::default() {
         gtk4::style_context_add_provider_for_display(
             &display,
             &provider,
@@ -126,17 +131,24 @@ fn build(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("Sound Route")
-        .default_width(920)
-        .default_height(640)
+        .default_width(900)
+        .default_height(620)
         .build();
 
-    window.set_size_request(340, 400);
+    window.set_size_request(320, 380);
 
     // Modern HeaderBar
     let header = HeaderBar::new();
     header.set_show_title_buttons(true);
 
-    // Left title branding
+    // Left Sidebar Toggle: Outputs
+    let btn_outputs = ToggleButton::with_label("Outputs");
+    btn_outputs.add_css_class("sidebar-btn");
+    btn_outputs.set_active(true);
+    btn_outputs.set_tooltip_text(Some("Toggle Hardware Outputs sidebar"));
+    header.pack_start(&btn_outputs);
+
+    // Center Title Branding
     let title_box = Box::new(Orientation::Vertical, 0);
     let title_label = Label::new(Some("Sound Route"));
     title_label.add_css_class("header-title");
@@ -144,41 +156,26 @@ fn build(app: &Application) {
     subtitle_label.add_css_class("header-subtitle");
     title_box.append(&title_label);
     title_box.append(&subtitle_label);
-    header.pack_start(&title_box);
+    header.set_title_widget(Some(&title_box));
 
-    // Center Responsive View Switcher
-    let view_switcher = Box::new(Orientation::Horizontal, 0);
-    view_switcher.add_css_class("linked");
-    view_switcher.add_css_class("view-switcher");
-
-    let btn_all = ToggleButton::with_label("All");
-    let btn_outputs = ToggleButton::with_label("Outputs");
-    let btn_streams = ToggleButton::with_label("Streams");
-
-    btn_outputs.set_group(Some(&btn_all));
-    btn_streams.set_group(Some(&btn_all));
-    btn_all.set_active(true);
-
-    view_switcher.append(&btn_all);
-    view_switcher.append(&btn_outputs);
-    view_switcher.append(&btn_streams);
-    header.set_title_widget(Some(&view_switcher));
-
-    // Right status & action
-    let status_pill = Label::new(Some("Ready"));
-    status_pill.add_css_class("status-pill");
-    header.pack_end(&status_pill);
-
+    // Right Controls
     let refresh_btn = Button::from_icon_name("view-refresh-symbolic");
     refresh_btn.set_tooltip_text(Some("Refresh audio graph and rescue disconnected streams"));
     refresh_btn.add_css_class("flat");
     header.pack_end(&refresh_btn);
 
+    // Right Sidebar Toggle: Streams
+    let btn_streams = ToggleButton::with_label("Streams");
+    btn_streams.add_css_class("sidebar-btn");
+    btn_streams.set_active(true);
+    btn_streams.set_tooltip_text(Some("Toggle Playback Streams sidebar"));
+    header.pack_end(&btn_streams);
+
     window.set_titlebar(Some(&header));
 
     let root = Box::new(Orientation::Vertical, 0);
 
-    // Dismissable alert banner
+    // Dismissable notification/error banner
     let banner_box = Box::new(Orientation::Horizontal, 8);
     banner_box.add_css_class("banner-box");
     banner_box.set_visible(false);
@@ -201,7 +198,7 @@ fn build(app: &Application) {
     banner_box.append(&banner_close);
     root.append(&banner_box);
 
-    // Paned Responsive Container
+    // Paned Container for Sidebars
     let paned = Paned::new(Orientation::Horizontal);
     paned.set_hexpand(true);
     paned.set_vexpand(true);
@@ -210,9 +207,8 @@ fn build(app: &Application) {
     paned.set_resize_start_child(true);
     paned.set_resize_end_child(true);
     paned.set_wide_handle(true);
-    paned.set_position(460);
 
-    // Outputs Column Wrapper
+    // Left Sidebar: Outputs Wrapper
     let devices_wrapper = Box::new(Orientation::Vertical, 6);
     devices_wrapper.set_margin_top(8);
     devices_wrapper.set_margin_bottom(8);
@@ -223,18 +219,15 @@ fn build(app: &Application) {
     let dev_icon = Image::from_icon_name("audio-speakers-symbolic");
     let dev_title = Label::new(Some("Audio Outputs"));
     dev_title.add_css_class("section-title");
-    let device_count_label = Label::new(Some("0"));
-    device_count_label.add_css_class("section-count-badge");
     dev_head.append(&dev_icon);
     dev_head.append(&dev_title);
-    dev_head.append(&device_count_label);
     devices_wrapper.append(&dev_head);
 
     let devices_box = Box::new(Orientation::Vertical, 0);
     devices_wrapper.append(&scrolled(&devices_box));
     paned.set_start_child(Some(&devices_wrapper));
 
-    // Streams Column Wrapper
+    // Right Sidebar: Streams Wrapper
     let streams_wrapper = Box::new(Orientation::Vertical, 6);
     streams_wrapper.set_margin_top(8);
     streams_wrapper.set_margin_bottom(8);
@@ -245,11 +238,8 @@ fn build(app: &Application) {
     let stream_icon = Image::from_icon_name("media-playback-start-symbolic");
     let stream_title = Label::new(Some("Playback Streams"));
     stream_title.add_css_class("section-title");
-    let stream_count_label = Label::new(Some("0"));
-    stream_count_label.add_css_class("section-count-badge");
     stream_head.append(&stream_icon);
     stream_head.append(&stream_title);
-    stream_head.append(&stream_count_label);
     streams_wrapper.append(&stream_head);
 
     let streams_box = Box::new(Orientation::Vertical, 0);
@@ -280,6 +270,12 @@ fn build(app: &Application) {
 
     window.set_child(Some(&root));
 
+    let sidebar_state = Rc::new(SidebarState {
+        outputs_open: Cell::new(true),
+        streams_open: Cell::new(true),
+        last_active: Cell::new(ActiveSidebar::Streams),
+    });
+
     let ui = Rc::new(RefCell::new(Ui {
         _window: window.clone(),
         paned,
@@ -287,18 +283,17 @@ fn build(app: &Application) {
         streams_wrapper,
         devices_box,
         streams_box,
-        view_mode: Rc::new(Cell::new(ViewMode::All)),
-        _btn_all: btn_all.clone(),
+        sidebar_state,
         btn_outputs: btn_outputs.clone(),
         btn_streams: btn_streams.clone(),
-        status_pill,
+        title_box,
         status_bar_left,
         status_bar_right,
         banner_box,
         banner_label,
         banner_icon,
-        device_count_label,
-        stream_count_label,
+        device_count: Cell::new(0),
+        stream_count: Cell::new(0),
         device_rows: Vec::new(),
         stream_rows: Vec::new(),
         routes: Vec::new(),
@@ -307,46 +302,104 @@ fn build(app: &Application) {
             building: Cell::new(false),
             dragging: Cell::new(false),
         }),
-        current_width: Rc::new(Cell::new(920)),
-        current_height: Rc::new(Cell::new(640)),
+        current_width: Rc::new(Cell::new(0)),
+        _current_height: Rc::new(Cell::new(0)),
     }));
 
-    // View switcher wiring
-    let ui_v_all = ui.clone();
-    btn_all.connect_toggled(move |btn| {
-        if btn.is_active() {
-            ui_v_all.borrow().view_mode.set(ViewMode::All);
-            update_responsive_layout(&ui_v_all);
+    // Outputs Toggle Click Handler
+    let ui_toggle_out = ui.clone();
+    btn_outputs.connect_clicked(move |_| {
+        let ui_ref = ui_toggle_out.borrow();
+        let width = ui_ref.current_width.get();
+        let is_narrow = width > 0 && width < NARROW_BREAKPOINT;
+        let state = &ui_ref.sidebar_state;
+
+        if is_narrow {
+            // In narrow mode: "one open = one closes"
+            state.last_active.set(ActiveSidebar::Outputs);
+            state.outputs_open.set(true);
+            state.streams_open.set(false);
+        } else {
+            // In wide mode: toggle independently
+            let current = state.outputs_open.get();
+            if current && state.streams_open.get() {
+                state.outputs_open.set(false);
+            } else {
+                state.outputs_open.set(true);
+                state.last_active.set(ActiveSidebar::Outputs);
+            }
         }
+        drop(ui_ref);
+        update_responsive_layout(&ui_toggle_out);
     });
 
-    let ui_v_out = ui.clone();
-    btn_outputs.connect_toggled(move |btn| {
-        if btn.is_active() {
-            ui_v_out.borrow().view_mode.set(ViewMode::Outputs);
-            update_responsive_layout(&ui_v_out);
+    // Streams Toggle Click Handler
+    let ui_toggle_str = ui.clone();
+    btn_streams.connect_clicked(move |_| {
+        let ui_ref = ui_toggle_str.borrow();
+        let width = ui_ref.current_width.get();
+        let is_narrow = width > 0 && width < NARROW_BREAKPOINT;
+        let state = &ui_ref.sidebar_state;
+
+        if is_narrow {
+            // In narrow mode: "one open = one closes"
+            state.last_active.set(ActiveSidebar::Streams);
+            state.streams_open.set(true);
+            state.outputs_open.set(false);
+        } else {
+            // In wide mode: toggle independently
+            let current = state.streams_open.get();
+            if current && state.outputs_open.get() {
+                state.streams_open.set(false);
+            } else {
+                state.streams_open.set(true);
+                state.last_active.set(ActiveSidebar::Streams);
+            }
         }
+        drop(ui_ref);
+        update_responsive_layout(&ui_toggle_str);
     });
 
-    let ui_v_str = ui.clone();
-    btn_streams.connect_toggled(move |btn| {
-        if btn.is_active() {
-            ui_v_str.borrow().view_mode.set(ViewMode::Streams);
-            update_responsive_layout(&ui_v_str);
-        }
-    });
+    // Frame-level resize tracking via add_tick_callback
+    let ui_tick = ui.clone();
+    window.add_tick_callback(move |win, _clock| {
+        let w = win.width();
+        let h = win.height();
+        let ui_ref = ui_tick.borrow();
+        let old_w = ui_ref.current_width.get();
+        let old_h = ui_ref._current_height.get();
+        if w > 0 && h > 0 && (w != old_w || h != old_h) {
+            let crossed_breakpoint = (old_w >= NARROW_BREAKPOINT && w < NARROW_BREAKPOINT)
+                || (old_w < NARROW_BREAKPOINT && w >= NARROW_BREAKPOINT && old_w > 0);
 
-    // Real-time responsive layout on resize
-    let ui_layout = ui.clone();
-    window.connect_realize(move |win| {
-        if let Some(surface) = win.surface() {
-            let ui_surf = ui_layout.clone();
-            surface.connect_layout(move |_, width, height| {
-                ui_surf.borrow().current_width.set(width);
-                ui_surf.borrow().current_height.set(height);
-                update_responsive_layout(&ui_surf);
-            });
+            ui_ref.current_width.set(w);
+            ui_ref._current_height.set(h);
+
+            if crossed_breakpoint {
+                let state = &ui_ref.sidebar_state;
+                if w >= NARROW_BREAKPOINT {
+                    // Restoring to wide mode: open both sidebars side-by-side
+                    state.outputs_open.set(true);
+                    state.streams_open.set(true);
+                } else {
+                    // Shrinking to narrow mode: keep last active open, close the other
+                    let active = state.last_active.get();
+                    match active {
+                        ActiveSidebar::Outputs => {
+                            state.outputs_open.set(true);
+                            state.streams_open.set(false);
+                        }
+                        ActiveSidebar::Streams => {
+                            state.streams_open.set(true);
+                            state.outputs_open.set(false);
+                        }
+                    }
+                }
+            }
+            drop(ui_ref);
+            update_responsive_layout(&ui_tick);
         }
+        glib::ControlFlow::Continue
     });
 
     let ui_refresh = ui.clone();
@@ -374,41 +427,62 @@ fn build(app: &Application) {
 
 fn update_responsive_layout(ui: &Rc<RefCell<Ui>>) {
     let ui_ref = ui.borrow();
-    let mode = ui_ref.view_mode.get();
     let width = ui_ref.current_width.get();
-    let height = ui_ref.current_height.get();
-    let is_narrow = width > 0 && width < 780;
+    let is_narrow = width > 0 && width < NARROW_BREAKPOINT;
 
-    ui_ref.status_pill.set_visible(width >= 640);
+    let dev_count = ui_ref.device_count.get();
+    let str_count = ui_ref.stream_count.get();
 
-    match mode {
-        ViewMode::Outputs => {
-            ui_ref.devices_wrapper.set_visible(true);
-            ui_ref.streams_wrapper.set_visible(false);
-            ui_ref.paned.set_orientation(Orientation::Horizontal);
-            ui_ref.paned.set_position(width.max(300));
-        }
-        ViewMode::Streams => {
-            ui_ref.devices_wrapper.set_visible(false);
-            ui_ref.streams_wrapper.set_visible(true);
-            ui_ref.paned.set_orientation(Orientation::Horizontal);
-            ui_ref.paned.set_position(0);
-        }
-        ViewMode::All => {
-            ui_ref.devices_wrapper.set_visible(true);
-            ui_ref.streams_wrapper.set_visible(true);
-            if is_narrow {
-                // Stack vertically for full-width cards on narrow tiles
-                ui_ref.paned.set_orientation(Orientation::Vertical);
-                let split = (height / 2).clamp(180, (height - 180).max(180));
-                ui_ref.paned.set_position(split);
-            } else {
-                // Side-by-side with balanced 50% split
-                ui_ref.paned.set_orientation(Orientation::Horizontal);
-                let split = (width / 2).max(280);
-                ui_ref.paned.set_position(split);
+    // Adapt HeaderBar buttons to width
+    if width > 0 && width < 440 {
+        ui_ref.btn_outputs.set_label(&format!("Out ({dev_count})"));
+        ui_ref.btn_streams.set_label(&format!("Apps ({str_count})"));
+        ui_ref.title_box.set_visible(width >= 350);
+    } else {
+        ui_ref.btn_outputs.set_label(&format!("Outputs ({dev_count})"));
+        ui_ref.btn_streams.set_label(&format!("Streams ({str_count})"));
+        ui_ref.title_box.set_visible(true);
+    }
+
+    let state = &ui_ref.sidebar_state;
+    if is_narrow {
+        // Enforce: one open = one closes
+        let active = state.last_active.get();
+        match active {
+            ActiveSidebar::Outputs => {
+                state.outputs_open.set(true);
+                state.streams_open.set(false);
+            }
+            ActiveSidebar::Streams => {
+                state.streams_open.set(true);
+                state.outputs_open.set(false);
             }
         }
+    } else {
+        // Wide screen: ensure at least one is open
+        if !state.outputs_open.get() && !state.streams_open.get() {
+            state.outputs_open.set(true);
+            state.streams_open.set(true);
+        }
+    }
+
+    let out_open = state.outputs_open.get();
+    let str_open = state.streams_open.get();
+
+    ui_ref.devices_wrapper.set_visible(out_open);
+    ui_ref.streams_wrapper.set_visible(str_open);
+
+    ui_ref.btn_outputs.set_active(out_open);
+    ui_ref.btn_streams.set_active(str_open);
+
+    if out_open && str_open {
+        ui_ref.paned.set_orientation(Orientation::Horizontal);
+        let split = (width / 2).max(260);
+        ui_ref.paned.set_position(split);
+    } else if out_open {
+        ui_ref.paned.set_position(width.max(300));
+    } else if str_open {
+        ui_ref.paned.set_position(0);
     }
 }
 
@@ -488,25 +562,8 @@ fn refresh(ui: &Rc<RefCell<Ui>>) {
 
     let managed = ui.borrow().routes.len();
     let ui_ref = ui.borrow();
-    ui_ref
-        .device_count_label
-        .set_text(&snap.devices.len().to_string());
-    ui_ref
-        .stream_count_label
-        .set_text(&snap.streams.len().to_string());
-
-    ui_ref
-        .btn_outputs
-        .set_label(&format!("Outputs ({})", snap.devices.len()));
-    ui_ref
-        .btn_streams
-        .set_label(&format!("Streams ({})", snap.streams.len()));
-
-    ui_ref.status_pill.set_text(&format!(
-        "{} Out • {} Stream",
-        snap.devices.len(),
-        snap.streams.len()
-    ));
+    ui_ref.device_count.set(snap.devices.len());
+    ui_ref.stream_count.set(snap.streams.len());
 
     ui_ref.status_bar_left.set_text(&format!(
         "PipeWire Audio Graph • {} outputs, {} playing apps",
@@ -522,7 +579,11 @@ fn refresh(ui: &Rc<RefCell<Ui>>) {
     if !notes.is_empty() {
         drop(ui_ref);
         set_banner(ui, false, &notes.join(" • "));
+    } else {
+        drop(ui_ref);
     }
+
+    update_responsive_layout(ui);
 }
 
 fn drop_routes_to_missing_devices(ui: &Rc<RefCell<Ui>>, snap: &Snapshot) {
@@ -554,12 +615,7 @@ fn shape_key(snap: &Snapshot) -> String {
         ));
     }
     for s in &snap.streams {
-        parts.push(format!(
-            "s:{}:{}:{}",
-            s.index,
-            s.serial,
-            s.sink
-        ));
+        parts.push(format!("s:{}:{}:{}", s.index, s.serial, s.sink));
     }
     for o in &snap.orphans {
         parts.push(format!("o:{}", o.pid));
@@ -622,11 +678,11 @@ fn rebuild_ui(ui: &Rc<RefCell<Ui>>, snap: &Snapshot) {
         empty_box.set_vexpand(true);
 
         let icon = Image::from_icon_name("audio-x-generic-symbolic");
-        icon.set_pixel_size(48);
+        icon.set_pixel_size(44);
         let title = Label::new(Some("No Active Audio Streams"));
         title.add_css_class("empty-title");
         let desc = Label::new(Some(
-            "Play audio from any browser, music player, or game to route and broadcast.",
+            "Play audio in any player, browser, or app to route.",
         ));
         desc.add_css_class("empty-desc");
         desc.set_wrap(true);
