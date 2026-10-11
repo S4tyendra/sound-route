@@ -1,8 +1,10 @@
 mod audio;
+mod tray;
 
 use std::cell::{Cell, RefCell};
 use std::process::Child;
 use std::rc::Rc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use gtk4::glib;
@@ -13,6 +15,8 @@ use gtk4::{
     GestureDrag, HeaderBar, Image, Label, Orientation, Paned, PolicyType, Scale, ScrolledWindow,
     SpinButton, StringList, ToggleButton,
 };
+
+use tray::{TrayCommand, TrayIcon};
 
 use audio::{
     align_delay_ms, device_by_index, device_by_name, fmt_ms, load_snapshot, move_stream, rescue,
@@ -102,6 +106,7 @@ struct Ui {
     device_rows: Vec<DeviceRow>,
     stream_rows: Vec<StreamRow>,
     routes: Vec<Route>,
+    tray: Option<TrayIcon>,
     shape: String,
     flags: Rc<Flags>,
     current_width: Rc<Cell<i32>>,
@@ -158,11 +163,19 @@ fn build(app: &Application) {
     title_box.append(&subtitle_label);
     header.set_title_widget(Some(&title_box));
 
+    let tray_btn = ToggleButton::with_label("Tray");
+    tray_btn.add_css_class("sidebar-btn");
+    tray_btn.set_active(true);
+    tray_btn.set_tooltip_text(Some(
+        "Keep Sound Route running when the window closes. Routes stay up until you quit from the tray.",
+    ));
+
     // Right Controls
     let refresh_btn = Button::from_icon_name("view-refresh-symbolic");
     refresh_btn.set_tooltip_text(Some("Refresh audio graph and rescue disconnected streams"));
     refresh_btn.add_css_class("flat");
     header.pack_end(&refresh_btn);
+    header.pack_end(&tray_btn);
 
     // Right Sidebar Toggle: Streams
     let btn_streams = ToggleButton::with_label("Streams");
@@ -297,6 +310,7 @@ fn build(app: &Application) {
         device_rows: Vec::new(),
         stream_rows: Vec::new(),
         routes: Vec::new(),
+        tray: None,
         shape: String::new(),
         flags: Rc::new(Flags {
             building: Cell::new(false),
@@ -414,10 +428,42 @@ fn build(app: &Application) {
         glib::ControlFlow::Continue
     });
 
+    let (tray_tx, tray_rx) = mpsc::channel::<TrayCommand>();
+    let tray_rx = Rc::new(RefCell::new(tray_rx));
+
+    let ui_tray = ui.clone();
+    let flags_tray = ui.borrow().flags.clone();
+    let tx_toggle = tray_tx.clone();
+    tray_btn.connect_toggled(move |btn| {
+        if flags_tray.building.get() {
+            return;
+        }
+        if btn.is_active() {
+            enable_tray(&ui_tray, &tx_toggle, btn);
+        } else {
+            disable_tray(&ui_tray);
+        }
+    });
+    enable_tray(&ui, &tray_tx, &tray_btn);
+
+    let ui_cmds = ui.clone();
+    let win_cmds = window.clone();
+    let app_cmds = app.clone();
+    glib::timeout_add_local(Duration::from_millis(150), move || {
+        handle_tray_commands(&ui_cmds, &win_cmds, &app_cmds, &tray_rx);
+        glib::ControlFlow::Continue
+    });
+
     let closing = ui.clone();
-    window.connect_close_request(move |_| {
-        shutdown(&closing);
-        glib::Propagation::Proceed
+    window.connect_close_request(move |win| {
+        let keep = closing.borrow().tray.is_some();
+        if keep {
+            win.set_visible(false);
+            glib::Propagation::Stop
+        } else {
+            shutdown(&closing);
+            glib::Propagation::Proceed
+        }
     });
 
     refresh(&ui);
@@ -1723,6 +1769,61 @@ fn port_dropdown(device: &Device) -> (DropDown, Vec<String>) {
         dd.set_selected(pos as u32);
     }
     (dd, names)
+}
+
+fn enable_tray(ui: &Rc<RefCell<Ui>>, tx: &Sender<TrayCommand>, btn: &ToggleButton) {
+    if ui.borrow().tray.is_some() {
+        return;
+    }
+    match TrayIcon::start(tx.clone()) {
+        Ok(icon) => {
+            ui.borrow_mut().tray = Some(icon);
+        }
+        Err(err) => {
+            let flags = ui.borrow().flags.clone();
+            flags.building.set(true);
+            btn.set_active(false);
+            flags.building.set(false);
+            set_banner(
+                ui,
+                true,
+                &format!("Tray is not available ({err}). Closing the window still stops routes."),
+            );
+        }
+    }
+}
+
+fn disable_tray(ui: &Rc<RefCell<Ui>>) {
+    if let Some(icon) = ui.borrow_mut().tray.take() {
+        icon.stop();
+    }
+    ui.borrow()._window.present();
+}
+
+fn handle_tray_commands(
+    ui: &Rc<RefCell<Ui>>,
+    window: &ApplicationWindow,
+    app: &Application,
+    rx: &Rc<RefCell<Receiver<TrayCommand>>>,
+) {
+    loop {
+        let cmd = { rx.borrow_mut().try_recv() };
+        match cmd {
+            Ok(TrayCommand::Show) => {
+                window.set_visible(true);
+                window.present();
+            }
+            Ok(TrayCommand::Quit) => {
+                if let Some(icon) = ui.borrow_mut().tray.take() {
+                    icon.stop();
+                }
+                shutdown(ui);
+                app.quit();
+                break;
+            }
+            Err(_) => break,
+        }
+    }
 }
 
 fn shutdown(ui: &Rc<RefCell<Ui>>) {
