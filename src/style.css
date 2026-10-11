@@ -7,13 +7,35 @@ window {
 
 .header-title {
     font-weight: 800;
-    font-size: 15px;
+    font-size: 14px;
     letter-spacing: -0.2px;
 }
 
 .header-subtitle {
+    font-size: 10px;
+    opacity: 0.65;
+}
+
+/* Responsive Segmented Switcher in HeaderBar */
+.view-switcher {
+    margin: 0 4px;
+}
+
+.view-switcher button {
+    padding: 3px 12px;
     font-size: 11px;
-    opacity: 0.7;
+    font-weight: 600;
+    border-radius: 0;
+}
+
+.view-switcher button:first-child {
+    border-top-left-radius: 9999px;
+    border-bottom-left-radius: 9999px;
+}
+
+.view-switcher button:last-child {
+    border-top-right-radius: 9999px;
+    border-bottom-right-radius: 9999px;
 }
 
 .status-pill {
@@ -27,7 +49,7 @@ window {
 
 .section-title {
     font-weight: 700;
-    font-size: 13px;
+    font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.6px;
     opacity: 0.85;
@@ -35,19 +57,21 @@ window {
 
 .section-count-badge {
     border-radius: 9999px;
-    padding: 1px 8px;
-    font-size: 11px;
+    padding: 1px 7px;
+    font-size: 10px;
     font-weight: 600;
     background-color: alpha(@window_fg_color, 0.08);
     color: alpha(@window_fg_color, 0.75);
 }
 
+/* Flexible Cards */
 .card {
+    min-width: 0;
     background-color: alpha(@window_fg_color, 0.035);
     border: 1px solid alpha(@window_fg_color, 0.09);
     border-radius: 12px;
-    padding: 14px;
-    margin-bottom: 10px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
     transition: background-color 150ms ease, border-color 150ms ease;
 }
 
@@ -78,7 +102,7 @@ window {
 
 .badge {
     border-radius: 6px;
-    padding: 2px 7px;
+    padding: 2px 6px;
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.3px;
@@ -123,12 +147,13 @@ window {
     font-family: monospace, sans-serif;
     font-size: 12px;
     font-weight: 600;
-    min-width: 42px;
+    min-width: 38px;
     opacity: 0.85;
 }
 
 .volume-scale {
     margin: 0 4px;
+    min-width: 70px;
 }
 
 .sub-panel {
@@ -136,7 +161,7 @@ window {
     border: 1px solid alpha(@window_fg_color, 0.06);
     border-radius: 10px;
     padding: 10px 12px;
-    margin-top: 8px;
+    margin-top: 6px;
 }
 
 .sub-panel-title {
@@ -170,7 +195,7 @@ window {
 .banner-box {
     border-radius: 8px;
     padding: 8px 12px;
-    margin: 6px 12px;
+    margin: 6px 10px;
     font-size: 12px;
 }
 
@@ -188,39 +213,39 @@ window {
 
 .status-bar {
     border-top: 1px solid alpha(@window_fg_color, 0.08);
-    padding: 6px 16px;
+    padding: 5px 14px;
     font-size: 11px;
     opacity: 0.75;
 }
 
 .status-dot {
     color: #2ec27e;
-    font-size: 14px;
+    font-size: 13px;
     margin-right: 4px;
 }
 
 .empty-state {
-    padding: 36px 20px;
+    padding: 30px 16px;
     border-radius: 12px;
     border: 1px dashed alpha(@window_fg_color, 0.15);
-    margin: 16px 0;
+    margin: 12px 0;
 }
 
 .empty-title {
     font-weight: 700;
-    font-size: 14px;
+    font-size: 13px;
     margin-top: 8px;
 }
 
 .empty-desc {
-    font-size: 12px;
+    font-size: 11px;
     opacity: 0.6;
     margin-top: 4px;
 }
 
 .pill-button {
     border-radius: 9999px;
-    padding: 3px 10px;
+    padding: 2px 9px;
     font-size: 11px;
     font-weight: 600;
 }
@@ -240,5 +265,11 @@ window {
     border: 1px solid alpha(#e5a50a, 0.25);
     border-radius: 10px;
     padding: 10px 14px;
-    margin-top: 12px;
+    margin-top: 10px;
+}
+
+paned separator {
+    min-width: 4px;
+    min-height: 4px;
+    background-color: alpha(@window_fg_color, 0.06);
 }

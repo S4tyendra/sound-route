@@ -34,6 +34,13 @@ struct Flags {
     dragging: Cell<bool>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ViewMode {
+    All,
+    Outputs,
+    Streams,
+}
+
 struct DeviceRow {
     name: String,
     scale: Scale,
@@ -71,8 +78,15 @@ struct StreamRow {
 
 struct Ui {
     _window: ApplicationWindow,
+    paned: Paned,
+    devices_wrapper: Box,
+    streams_wrapper: Box,
     devices_box: Box,
     streams_box: Box,
+    view_mode: Rc<Cell<ViewMode>>,
+    _btn_all: ToggleButton,
+    btn_outputs: ToggleButton,
+    btn_streams: ToggleButton,
     status_pill: Label,
     status_bar_left: Label,
     status_bar_right: Label,
@@ -86,6 +100,8 @@ struct Ui {
     routes: Vec<Route>,
     shape: String,
     flags: Rc<Flags>,
+    current_width: Rc<Cell<i32>>,
+    current_height: Rc<Cell<i32>>,
 }
 
 fn main() {
@@ -97,7 +113,6 @@ fn main() {
 }
 
 fn build(app: &Application) {
-    // Load and register CSS styles
     let provider = CssProvider::new();
     provider.load_from_string(STYLE_CSS);
     if let Some(display) = gdk::Display::default() {
@@ -111,23 +126,45 @@ fn build(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("Sound Route")
-        .default_width(1080)
-        .default_height(720)
+        .default_width(920)
+        .default_height(640)
         .build();
+
+    window.set_size_request(340, 400);
 
     // Modern HeaderBar
     let header = HeaderBar::new();
     header.set_show_title_buttons(true);
 
+    // Left title branding
     let title_box = Box::new(Orientation::Vertical, 0);
     let title_label = Label::new(Some("Sound Route"));
     title_label.add_css_class("header-title");
-    let subtitle_label = Label::new(Some("PipeWire Audio Router & Mixer"));
+    let subtitle_label = Label::new(Some("PipeWire Audio Router"));
     subtitle_label.add_css_class("header-subtitle");
     title_box.append(&title_label);
     title_box.append(&subtitle_label);
-    header.set_title_widget(Some(&title_box));
+    header.pack_start(&title_box);
 
+    // Center Responsive View Switcher
+    let view_switcher = Box::new(Orientation::Horizontal, 0);
+    view_switcher.add_css_class("linked");
+    view_switcher.add_css_class("view-switcher");
+
+    let btn_all = ToggleButton::with_label("All");
+    let btn_outputs = ToggleButton::with_label("Outputs");
+    let btn_streams = ToggleButton::with_label("Streams");
+
+    btn_outputs.set_group(Some(&btn_all));
+    btn_streams.set_group(Some(&btn_all));
+    btn_all.set_active(true);
+
+    view_switcher.append(&btn_all);
+    view_switcher.append(&btn_outputs);
+    view_switcher.append(&btn_streams);
+    header.set_title_widget(Some(&view_switcher));
+
+    // Right status & action
     let status_pill = Label::new(Some("Ready"));
     status_pill.add_css_class("status-pill");
     header.pack_end(&status_pill);
@@ -141,7 +178,7 @@ fn build(app: &Application) {
 
     let root = Box::new(Orientation::Vertical, 0);
 
-    // Dismissable notification/error banner
+    // Dismissable alert banner
     let banner_box = Box::new(Orientation::Horizontal, 8);
     banner_box.add_css_class("banner-box");
     banner_box.set_visible(false);
@@ -164,18 +201,23 @@ fn build(app: &Application) {
     banner_box.append(&banner_close);
     root.append(&banner_box);
 
-    // Main Columns Layout
+    // Paned Responsive Container
     let paned = Paned::new(Orientation::Horizontal);
     paned.set_hexpand(true);
     paned.set_vexpand(true);
+    paned.set_shrink_start_child(true);
+    paned.set_shrink_end_child(true);
+    paned.set_resize_start_child(true);
+    paned.set_resize_end_child(true);
+    paned.set_wide_handle(true);
     paned.set_position(460);
 
-    // Left Column: Outputs
-    let devices_wrapper = Box::new(Orientation::Vertical, 8);
-    devices_wrapper.set_margin_top(12);
-    devices_wrapper.set_margin_bottom(12);
-    devices_wrapper.set_margin_start(14);
-    devices_wrapper.set_margin_end(8);
+    // Outputs Column Wrapper
+    let devices_wrapper = Box::new(Orientation::Vertical, 6);
+    devices_wrapper.set_margin_top(8);
+    devices_wrapper.set_margin_bottom(8);
+    devices_wrapper.set_margin_start(10);
+    devices_wrapper.set_margin_end(6);
 
     let dev_head = Box::new(Orientation::Horizontal, 8);
     let dev_icon = Image::from_icon_name("audio-speakers-symbolic");
@@ -192,12 +234,12 @@ fn build(app: &Application) {
     devices_wrapper.append(&scrolled(&devices_box));
     paned.set_start_child(Some(&devices_wrapper));
 
-    // Right Column: Streams
-    let streams_wrapper = Box::new(Orientation::Vertical, 8);
-    streams_wrapper.set_margin_top(12);
-    streams_wrapper.set_margin_bottom(12);
-    streams_wrapper.set_margin_start(8);
-    streams_wrapper.set_margin_end(14);
+    // Streams Column Wrapper
+    let streams_wrapper = Box::new(Orientation::Vertical, 6);
+    streams_wrapper.set_margin_top(8);
+    streams_wrapper.set_margin_bottom(8);
+    streams_wrapper.set_margin_start(6);
+    streams_wrapper.set_margin_end(10);
 
     let stream_head = Box::new(Orientation::Horizontal, 8);
     let stream_icon = Image::from_icon_name("media-playback-start-symbolic");
@@ -225,6 +267,8 @@ fn build(app: &Application) {
     let status_bar_left = Label::new(Some("PipeWire Connected"));
     status_bar_left.set_xalign(0.0);
     status_bar_left.set_hexpand(true);
+    status_bar_left.set_ellipsize(pango::EllipsizeMode::End);
+    status_bar_left.set_width_chars(1);
 
     let status_bar_right = Label::new(Some("0 copies active"));
     status_bar_right.set_xalign(1.0);
@@ -238,8 +282,15 @@ fn build(app: &Application) {
 
     let ui = Rc::new(RefCell::new(Ui {
         _window: window.clone(),
+        paned,
+        devices_wrapper,
+        streams_wrapper,
         devices_box,
         streams_box,
+        view_mode: Rc::new(Cell::new(ViewMode::All)),
+        _btn_all: btn_all.clone(),
+        btn_outputs: btn_outputs.clone(),
+        btn_streams: btn_streams.clone(),
         status_pill,
         status_bar_left,
         status_bar_right,
@@ -256,9 +307,48 @@ fn build(app: &Application) {
             building: Cell::new(false),
             dragging: Cell::new(false),
         }),
+        current_width: Rc::new(Cell::new(920)),
+        current_height: Rc::new(Cell::new(640)),
     }));
 
-    // Manual Refresh button wiring
+    // View switcher wiring
+    let ui_v_all = ui.clone();
+    btn_all.connect_toggled(move |btn| {
+        if btn.is_active() {
+            ui_v_all.borrow().view_mode.set(ViewMode::All);
+            update_responsive_layout(&ui_v_all);
+        }
+    });
+
+    let ui_v_out = ui.clone();
+    btn_outputs.connect_toggled(move |btn| {
+        if btn.is_active() {
+            ui_v_out.borrow().view_mode.set(ViewMode::Outputs);
+            update_responsive_layout(&ui_v_out);
+        }
+    });
+
+    let ui_v_str = ui.clone();
+    btn_streams.connect_toggled(move |btn| {
+        if btn.is_active() {
+            ui_v_str.borrow().view_mode.set(ViewMode::Streams);
+            update_responsive_layout(&ui_v_str);
+        }
+    });
+
+    // Real-time responsive layout on resize
+    let ui_layout = ui.clone();
+    window.connect_realize(move |win| {
+        if let Some(surface) = win.surface() {
+            let ui_surf = ui_layout.clone();
+            surface.connect_layout(move |_, width, height| {
+                ui_surf.borrow().current_width.set(width);
+                ui_surf.borrow().current_height.set(height);
+                update_responsive_layout(&ui_surf);
+            });
+        }
+    });
+
     let ui_refresh = ui.clone();
     refresh_btn.connect_clicked(move |_| {
         ui_refresh.borrow_mut().shape.clear();
@@ -278,7 +368,48 @@ fn build(app: &Application) {
     });
 
     refresh(&ui);
+    update_responsive_layout(&ui);
     window.present();
+}
+
+fn update_responsive_layout(ui: &Rc<RefCell<Ui>>) {
+    let ui_ref = ui.borrow();
+    let mode = ui_ref.view_mode.get();
+    let width = ui_ref.current_width.get();
+    let height = ui_ref.current_height.get();
+    let is_narrow = width > 0 && width < 780;
+
+    ui_ref.status_pill.set_visible(width >= 640);
+
+    match mode {
+        ViewMode::Outputs => {
+            ui_ref.devices_wrapper.set_visible(true);
+            ui_ref.streams_wrapper.set_visible(false);
+            ui_ref.paned.set_orientation(Orientation::Horizontal);
+            ui_ref.paned.set_position(width.max(300));
+        }
+        ViewMode::Streams => {
+            ui_ref.devices_wrapper.set_visible(false);
+            ui_ref.streams_wrapper.set_visible(true);
+            ui_ref.paned.set_orientation(Orientation::Horizontal);
+            ui_ref.paned.set_position(0);
+        }
+        ViewMode::All => {
+            ui_ref.devices_wrapper.set_visible(true);
+            ui_ref.streams_wrapper.set_visible(true);
+            if is_narrow {
+                // Stack vertically for full-width cards on narrow tiles
+                ui_ref.paned.set_orientation(Orientation::Vertical);
+                let split = (height / 2).clamp(180, (height - 180).max(180));
+                ui_ref.paned.set_position(split);
+            } else {
+                // Side-by-side with balanced 50% split
+                ui_ref.paned.set_orientation(Orientation::Horizontal);
+                let split = (width / 2).max(280);
+                ui_ref.paned.set_position(split);
+            }
+        }
+    }
 }
 
 fn scrolled(child: &Box) -> ScrolledWindow {
@@ -364,8 +495,15 @@ fn refresh(ui: &Rc<RefCell<Ui>>) {
         .stream_count_label
         .set_text(&snap.streams.len().to_string());
 
+    ui_ref
+        .btn_outputs
+        .set_label(&format!("Outputs ({})", snap.devices.len()));
+    ui_ref
+        .btn_streams
+        .set_label(&format!("Streams ({})", snap.streams.len()));
+
     ui_ref.status_pill.set_text(&format!(
-        "{} Outputs • {} Streams",
+        "{} Out • {} Stream",
         snap.devices.len(),
         snap.streams.len()
     ));
@@ -416,7 +554,12 @@ fn shape_key(snap: &Snapshot) -> String {
         ));
     }
     for s in &snap.streams {
-        parts.push(format!("s:{}:{}:{}", s.index, s.serial, s.sink));
+        parts.push(format!(
+            "s:{}:{}:{}",
+            s.index,
+            s.serial,
+            s.sink
+        ));
     }
     for o in &snap.orphans {
         parts.push(format!("o:{}", o.pid));
@@ -516,6 +659,8 @@ fn rebuild_ui(ui: &Rc<RefCell<Ui>>, snap: &Snapshot) {
         o_title.add_css_class("card-title");
         o_title.set_hexpand(true);
         o_title.set_xalign(0.0);
+        o_title.set_ellipsize(pango::EllipsizeMode::End);
+        o_title.set_width_chars(1);
 
         let stop_all = Button::with_label("Stop All");
         stop_all.add_css_class("destructive-action");
@@ -541,6 +686,8 @@ fn rebuild_ui(ui: &Rc<RefCell<Ui>>, snap: &Snapshot) {
             text.set_xalign(0.0);
             text.set_hexpand(true);
             text.add_css_class("card-subtitle");
+            text.set_ellipsize(pango::EllipsizeMode::End);
+            text.set_width_chars(1);
 
             let stop = Button::with_label("Stop");
             stop.add_css_class("pill-button");
@@ -574,7 +721,7 @@ fn build_device_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, device: &Device, pare
         card.add_css_class("card-default");
     }
 
-    // Header row: Icon, Name/Desc, Badges, Default button
+    // Header row
     let head = Box::new(Orientation::Horizontal, 8);
     let dev_icon = Image::from_icon_name(icon_for_device(&device.name, &device.description));
     dev_icon.set_pixel_size(24);
@@ -586,11 +733,14 @@ fn build_device_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, device: &Device, pare
     title.set_xalign(0.0);
     title.add_css_class("card-title");
     title.set_ellipsize(pango::EllipsizeMode::End);
+    title.set_width_chars(1);
     title.set_tooltip_text(Some(&device.description));
 
     let latency = Label::new(Some(&device_subtitle(snap, device)));
     latency.set_xalign(0.0);
     latency.add_css_class("card-subtitle");
+    latency.set_ellipsize(pango::EllipsizeMode::End);
+    latency.set_width_chars(1);
     title_box.append(&title);
     title_box.append(&latency);
     head.append(&title_box);
@@ -632,7 +782,7 @@ fn build_device_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, device: &Device, pare
     head.append(&badges_box);
     card.append(&head);
 
-    // Volume Strip: Mute button, Slider, Value Label
+    // Volume Strip
     let vol_row = Box::new(Orientation::Horizontal, 8);
     let mute = ToggleButton::new();
     mute.add_css_class("flat");
@@ -686,7 +836,7 @@ fn build_device_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, device: &Device, pare
     });
     card.append(&vol_row);
 
-    // Port Selector (if hardware has multiple switchable ports)
+    // Port Selector
     let (port, port_names) = port_dropdown(device);
     if port_names.len() > 1 {
         let port_row = Box::new(Orientation::Horizontal, 8);
@@ -695,6 +845,7 @@ fn build_device_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, device: &Device, pare
         let port_label = Label::new(Some("Port:"));
         port_label.add_css_class("card-subtitle");
         port.set_hexpand(true);
+        port.set_size_request(60, -1);
 
         port_row.append(&port_icon);
         port_row.append(&port_label);
@@ -749,7 +900,7 @@ fn build_stream_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, stream: &Stream, pare
     let card = Box::new(Orientation::Vertical, 8);
     card.add_css_class("card");
 
-    // Header row: Stream Icon, Title, Detail, Badges
+    // Header row
     let head = Box::new(Orientation::Horizontal, 8);
     let app_icon = Image::from_icon_name(icon_for_stream(&stream.title, &stream.detail));
     app_icon.set_pixel_size(24);
@@ -761,6 +912,7 @@ fn build_stream_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, stream: &Stream, pare
     title.set_xalign(0.0);
     title.add_css_class("card-title");
     title.set_ellipsize(pango::EllipsizeMode::End);
+    title.set_width_chars(1);
 
     let detail_text = if stream.detail.is_empty() {
         format!("Stream index {}", stream.index)
@@ -771,6 +923,7 @@ fn build_stream_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, stream: &Stream, pare
     detail.set_xalign(0.0);
     detail.add_css_class("card-subtitle");
     detail.set_ellipsize(pango::EllipsizeMode::End);
+    detail.set_width_chars(1);
 
     title_box.append(&title);
     title_box.append(&detail);
@@ -848,7 +1001,7 @@ fn build_stream_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, stream: &Stream, pare
     // Primary Output Selector Row
     let out_row = Box::new(Orientation::Horizontal, 8);
     out_row.set_margin_top(4);
-    let out_label = Label::new(Some("Primary Output:"));
+    let out_label = Label::new(Some("Primary:"));
     out_label.add_css_class("card-subtitle");
 
     let names: Vec<String> = snap.devices.iter().map(|d| d.name.clone()).collect();
@@ -862,6 +1015,7 @@ fn build_stream_row(ui: &Rc<RefCell<Ui>>, snap: &Snapshot, stream: &Stream, pare
         output.set_selected(pos as u32);
     }
     output.set_hexpand(true);
+    output.set_size_request(60, -1);
 
     let previous = Rc::new(Cell::new(output.selected()));
     let flags_o = flags.clone();
@@ -970,7 +1124,7 @@ fn build_extra(
         item_box.add_css_class("active-copy");
     }
 
-    // Top line: Checkbox with target name & latency
+    // Top line
     let top_line = Box::new(Orientation::Horizontal, 8);
     let dev_icon = Image::from_icon_name(icon_for_device(&device.name, &device.description));
     top_line.append(&dev_icon);
@@ -986,9 +1140,9 @@ fn build_extra(
     top_line.append(&lat_badge);
     item_box.append(&top_line);
 
-    // Controls line: Delay Spin, Auto Sync, Whole output checkbox
+    // Controls line
     let ctrl_line = Box::new(Orientation::Horizontal, 8);
-    ctrl_line.set_margin_start(28);
+    ctrl_line.set_margin_start(24);
 
     let sync_label = Label::new(Some("Delay:"));
     sync_label.add_css_class("card-subtitle");
@@ -1023,11 +1177,11 @@ fn build_extra(
 
     let hint = Label::new(Some(&extra_hint(snap, stream, device)));
     hint.set_xalign(0.0);
-    hint.set_margin_start(28);
+    hint.set_margin_start(24);
     hint.add_css_class("hint-text");
     item_box.append(&hint);
 
-    // Wiring Enable toggle (Instant toggle, zero annoying popups!)
+    // Wiring Enable toggle
     let flags = ui.borrow().flags.clone();
     let ui_e = ui.clone();
     let stream_index = stream.index;
@@ -1461,6 +1615,7 @@ fn volume_scale(volume: f64) -> Scale {
     scale.set_value(volume * 100.0);
     scale.set_draw_value(false);
     scale.set_hexpand(true);
+    scale.set_width_request(70);
     scale.add_css_class("volume-scale");
     scale
 }
