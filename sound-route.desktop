@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Sound Route
+GenericName=Audio router
+Comment=Route each stream to an output, copy audio to more devices, and recover when a headset disconnects
+Exec=sound-route
+Icon=/usr/share/pixmaps/sound-route.png
+Terminal=false
+Categories=AudioVideo;Audio;Mixer;
+Keywords=audio;pipewire;volume;headset;speakers;route;
+StartupWMClass=in.devh.SoundRoute
